@@ -23,11 +23,12 @@ jobs:
       with:
         go-version: '1.22'
 
-    - name: Get current date and time
+    - name: Get current date and time (UTC+3)
       run: |
-        echo "DATE=$(Get-Date -Format 'yyyyMMdd')" >> $env:GITHUB_ENV
-        echo "DATETIME=$(Get-Date -Format 'yyyy-MM-dd HH:mm')" >> $env:GITHUB_ENV
-        echo "TAGNAME=v$(Get-Date -Format 'yyyyMMdd-HHmmss')" >> $env:GITHUB_ENV
+        $now = (Get-Date).AddHours(3)
+        echo "DATE=$($now.ToString('yyyyMMdd'))" >> $env:GITHUB_ENV
+        echo "DATETIME=$($now.ToString('yyyy-MM-dd HH:mm'))" >> $env:GITHUB_ENV
+        echo "TAGNAME=v$($now.ToString('yyyyMMdd-HHmmss'))" >> $env:GITHUB_ENV
 
     - name: Build Windows Executable
       run: |
@@ -44,7 +45,7 @@ jobs:
       with:
         tag_name: ${{ env.TAGNAME }}
         name: Build ${{ env.DATETIME }}
-        body: ${{ env.DATETIME }}
+        body: Build Date and Time: ${{ env.DATETIME }}
         files: mesnevi.exe
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
