@@ -1,0 +1,86 @@
+name: Auto Update Offsets
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
+
+jobs:
+  update-offsets:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Fetch and Process Offsets
+        run: |
+          python -c '
+          import urllib.request
+          import json
+
+          OFFSETS_URL = "https://raw.githubusercontent.com/a2x/cs2-dumper/main/output/offsets.json"
+          CLIENT_URL = "https://raw.githubusercontent.com/a2x/cs2-dumper/main/output/client_dll.json"
+
+          req_off = urllib.request.urlopen(OFFSETS_URL)
+          raw_offsets = json.loads(req_off.read().decode())
+
+          req_cli = urllib.request.urlopen(CLIENT_URL)
+          raw_client = json.loads(req_cli.read().decode())
+
+          classes = raw_client.get("client.dll", {}).get("classes", {})
+
+          def get_field_offset(class_name, field_name):
+              fields = classes.get(class_name, {}).get("fields", {})
+              return fields.get(field_name)
+
+          my_offsets = {
+              "dwViewMatrix": raw_offsets.get("client.dll", {}).get("dwViewMatrix"),
+              "dwLocalPlayerPawn": raw_offsets.get("client.dll", {}).get("dwLocalPlayerPawn"),
+              "dwEntityList": raw_offsets.get("client.dll", {}).get("dwEntityList"),
+              "m_hPlayerPawn": get_field_offset("CCSPlayerController", "m_hPlayerPawn"),
+              "m_iHealth": get_field_offset("C_BaseEntity", "m_iHealth"),
+              "m_lifeState": get_field_offset("C_BaseEntity", "m_lifeState"),
+              "m_iTeamNum": get_field_offset("C_BaseEntity", "m_iTeamNum"),
+              "m_vOldOrigin": get_field_offset("C_BasePlayerPawn", "m_vOldOrigin"),
+              "m_pGameSceneNode": get_field_offset("C_BaseEntity", "m_pGameSceneNode"),
+              "m_modelState": get_field_offset("CSkeletonInstance", "m_modelState"),
+              "m_boneArray": get_field_offset("C_CSGO_PreviewModel", "m_boneArray") or get_field_offset("CModelConfig", "m_boneArray") or 128,
+              "m_nodeToWorld": get_field_offset("CGameSceneNode", "m_nodeToWorld"),
+              "m_sSanitizedPlayerName": get_field_offset("CCSPlayerController", "m_sSanitizedPlayerName")
+          }
+
+          with open("offsets.json", "w", encoding="utf-8") as f:
+              json.dump(my_offsets, f, indent=4)
+          '
+
+      - name: Commit, Push and Trigger Build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          
+          if git status --porcelain | grep -q "offsets.json"; then
+            echo "Offset changes detected, committing updates..."
+            git add offsets.json
+            git commit -m "chore: auto update CS2 offsets"
+            git push
+
+            echo "Triggering build-go.yml workflow..."
+            curl -X POST \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              https://api.github.com/repos/${{ github.repository }}/actions/workflows/build-go.yml/dispatches \
+              -d '{"ref":"main"}'
+          else
+            echo "Offsets are already up to date, no changes detected."
+          fi
