@@ -45,7 +45,7 @@ jobs:
       with:
         tag_name: ${{ env.TAGNAME }}
         name: Build ${{ env.DATETIME }}
-        body: Build Date and Time: ${{ env.DATETIME }}
+        body: ${{ env.DATETIME }}
         files: mesnevi.exe
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
