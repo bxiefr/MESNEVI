@@ -89,7 +89,7 @@ var (
 	createCompatibleDC         = gdi32.NewProc("CreateCompatibleDC")
 	createSolidBrush           = gdi32.NewProc("CreateSolidBrush")
 	createPen                  = gdi32.NewProc("CreatePen")
-	GetAsyncKeyState           = user32.NewProc("GetAsyncKeyState")
+	GetAsyncKeyState             = user32.NewProc("GetAsyncKeyState")
 	beepProc                   = kernel32.NewProc("Beep")
 )
 
