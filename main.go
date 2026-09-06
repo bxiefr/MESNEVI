@@ -489,7 +489,6 @@ func createDynamicHealthPen(hp int32) uintptr {
 	return pen
 }
 
-// YENİ: aPen ve armor parametreleri eklendi
 func renderEntityInfo(hdc win.HDC, tPen uintptr, gPen uintptr, oPen uintptr, hPen uintptr, aPen uintptr, rect Rectangle, hp int32, armor int32, name string, headPos Vector3, distance float32) {
 	if boxRendering {
 		win.SelectObject(hdc, win.HGDIOBJ(tPen))
@@ -539,28 +538,38 @@ func renderEntityInfo(hdc win.HDC, tPen uintptr, gPen uintptr, oPen uintptr, hPe
 		win.LineTo(hdc, int32(rect.Left)-5, int32(rect.Top)-1)
 	}
 
-	// YENİ: Zırh Barı Çizimi (Kutunun sağ tarafına çizilir)
+	// Zırh Barı ve Yüzdesi Çizimi
 	if armorBarRendering && armor > 0 {
 		if armor > 100 {
 			armor = 100
 		}
 		
+		yPos := int(rect.Bottom) + 1 - int(float64(int(rect.Bottom)+1-int(rect.Top))*float64(armor)/100.0)
+
+		// Barı çiz
 		win.SelectObject(hdc, win.HGDIOBJ(aPen))
-		win.MoveToEx(hdc, int(rect.Right)+4, int(rect.Bottom)+1-int(float64(int(rect.Bottom)+1-int(rect.Top))*float64(armor)/100.0), nil)
+		win.MoveToEx(hdc, int(rect.Right)+4, yPos, nil)
 		win.LineTo(hdc, int32(rect.Right)+4, int32(rect.Bottom)+1)
 
+		// Barın dış çerçevesini çiz
 		win.SelectObject(hdc, win.HGDIOBJ(oPen))
 		win.MoveToEx(hdc, int(rect.Right)+3, int(rect.Top)-1, nil)
 		win.LineTo(hdc, int32(rect.Right)+3, int32(rect.Bottom)+1)
 		win.LineTo(hdc, int32(rect.Right)+5, int32(rect.Bottom)+1)
 		win.LineTo(hdc, int32(rect.Right)+5, int32(rect.Top)-1)
 		win.LineTo(hdc, int32(rect.Right)+3, int32(rect.Top)-1)
+
+		// Zırh miktarını sayı (yüzde) olarak yazdır
+		armorText, _ := windows.UTF16PtrFromString(fmt.Sprintf("%d", armor))
+		win.SetTextColor(hdc, win.RGB(byte(0), byte(204), byte(255))) // Açık mavi (Camgöbeği)
+		setTextAlign.Call(uintptr(hdc), 0x00000000) // TA_LEFT (Sola dayalı, barın sağına yazması için)
+		win.TextOut(hdc, int32(rect.Right)+8, int32(yPos)-4, armorText, int32(len(fmt.Sprintf("%d", armor))))
 	}
 
 	if healthTextRendering {
 		text, _ := windows.UTF16PtrFromString(fmt.Sprintf("%d", hp))
 		win.SetTextColor(hdc, win.RGB(byte(0), byte(255), byte(50)))
-		setTextAlign.Call(uintptr(hdc), 0x00000002)
+		setTextAlign.Call(uintptr(hdc), 0x00000002) // TA_RIGHT
 		if healthBarRendering {
 			win.TextOut(hdc, int32(rect.Left)-8, int32(int(rect.Bottom)+1-int(float64(int(rect.Bottom)+1-int(rect.Top))*float64(hp)/100.0)), text, int32(len(fmt.Sprintf("%d", hp))))
 		} else {
