@@ -55,7 +55,8 @@ jobs:
               "m_modelState": get_field_offset("CSkeletonInstance", "m_modelState"),
               "m_boneArray": get_field_offset("C_CSGO_PreviewModel", "m_boneArray") or get_field_offset("CModelConfig", "m_boneArray") or 128,
               "m_nodeToWorld": get_field_offset("CGameSceneNode", "m_nodeToWorld"),
-              "m_sSanitizedPlayerName": get_field_offset("CCSPlayerController", "m_sSanitizedPlayerName")
+              "m_sSanitizedPlayerName": get_field_offset("CCSPlayerController", "m_sSanitizedPlayerName"),
+              "m_ArmorValue": get_field_offset("CCSPlayerController", "m_ArmorValue") or get_field_offset("C_CSPlayerPawn", "m_ArmorValue")
           }
 
           with open("offsets.json", "w", encoding="utf-8") as f:
@@ -84,3 +85,4 @@ jobs:
           else
             echo "Offsets are already up to date, no changes detected."
           fi
+          
