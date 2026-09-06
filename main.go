@@ -60,22 +60,22 @@ type Entity struct {
 }
 
 type Offset struct {
-	DwViewMatrix           uintptr `json:"dwViewMatrix"`
-	DwLocalPlayerPawn      uintptr `json:"dwLocalPlayerPawn"`
-	DwEntityList           uintptr `json:"dwEntityList"`
-	M_hPlayerPawn          uintptr `json:"m_hPlayerPawn"`
-	M_iHealth              uintptr `json:"m_iHealth"`
-	M_lifeState            uintptr `json:"m_lifeState"`
-	M_iTeamNum             uintptr `json:"m_iTeamNum"`
-	M_vOldOrigin           uintptr `json:"m_vOldOrigin"`
-	M_pGameSceneNode       uintptr `json:"m_pGameSceneNode"`
-	M_modelState           uintptr `json:"m_modelState"`
-	M_boneArray            uintptr `json:"m_boneArray"`
-	M_nodeToWorld          uintptr `json:"m_nodeToWorld"`
+	DwViewMatrix         uintptr `json:"dwViewMatrix"`
+	DwLocalPlayerPawn    uintptr `json:"dwLocalPlayerPawn"`
+	DwEntityList         uintptr `json:"dwEntityList"`
+	M_hPlayerPawn        uintptr `json:"m_hPlayerPawn"`
+	M_iHealth            uintptr `json:"m_iHealth"`
+	M_lifeState          uintptr `json:"m_lifeState"`
+	M_iTeamNum           uintptr `json:"m_iTeamNum"`
+	M_vOldOrigin         uintptr `json:"m_vOldOrigin"`
+	M_pGameSceneNode     uintptr `json:"m_pGameSceneNode"`
+	M_modelState         uintptr `json:"m_modelState"`
+	M_boneArray          uintptr `json:"m_boneArray"`
+	M_nodeToWorld        uintptr `json:"m_nodeToWorld"`
 	M_sSanitizedPlayerName uintptr `json:"m_sSanitizedPlayerName"`
-	M_ArmorValue           uintptr `json:"m_ArmorValue"`
-	M_pBulletServices      uintptr `json:"m_pBulletServices"`   // YENİ: Bullet Services
-	M_totalHitsOnServer    uintptr `json:"m_totalHitsOnServer"` // YENİ: Total Hits
+	M_ArmorValue         uintptr `json:"m_ArmorValue"`
+	M_pBulletServices    uintptr `json:"m_pBulletServices"`    // YENİ: Bullet Services
+	M_totalHitsOnServer  uintptr `json:"m_totalHitsOnServer"` // YENİ: Total Hits
 }
 
 var (
@@ -104,19 +104,19 @@ const (
 )
 
 var (
-	teamCheck          bool    = true
-	headCircle         bool    = true
-	skeletonRendering  bool    = true
-	boxRendering       bool    = true
-	nameRendering      bool    = true
-	healthBarRendering bool    = true
-	armorBarRendering  bool    = true
-	healthTextRendering bool   = true
-	distanceRendering  bool    = true
-	hitmarkerRendering bool    = true // YENİ: Hitmarker
-	hitSoundRendering  bool    = true // YENİ: Hit Sound
-	frameDelay         uint32  = 15
-	currentHue         float64 = 0
+	teamCheck           bool    = true
+	headCircle          bool    = true
+	skeletonRendering   bool    = true
+	boxRendering        bool    = true
+	nameRendering       bool    = true
+	healthBarRendering  bool    = true
+	armorBarRendering   bool    = true
+	healthTextRendering bool    = true
+	distanceRendering   bool    = true
+	hitmarkerRendering  bool    = true // YENİ: Hitmarker
+	hitSoundRendering   bool    = true // YENİ: Hit Sound
+	frameDelay          uint32  = 15
+	currentHue          float64 = 0
 
 	// Hitmarker takibi için değişkenler
 	lastHits    int32 = -1
@@ -124,12 +124,12 @@ var (
 )
 
 const asciiArt = `
-  _____   ___________ _________ _______    _______________    ____.___ 
- /     \  \_   _____//   _____/ \      \   \_   _____/\   \  /   /|   |
-/  \ /  \  |    __)_ \_____  \  /   |   \   |    __)_  \   Y   / |   |
-/    Y    \ |        \/        \/    |    \  |        \  \     /  |   |
-\____|__  /_______  /_______  /\____|__  /_______  /   \___/   |___|
-        \/        \/        \/         \/        \/                  `
+ _____    ___________ _________ _______    _______________    ____.___ 
+/     \   \_     __//   _____/ \      \   \_   _____/\   \  /   /|   |
+\     \ /  \   | __)\_____  \  /   |   \   |    __)_  \   Y   / |   |
+ \     Y    /   |    \/       \/    |    \  |        \  \     /  |   |
+  \___|__  /_______  /_______  /\____|__  /_______  /   \___/   |___|
+         \/        \/        \/         \/        \/                 `
 
 var (
 	bgBrush            uintptr
@@ -530,16 +530,16 @@ func drawHitmarker(hdc win.HDC, pen uintptr, screenWidth, screenHeight uintptr) 
 	win.SelectObject(hdc, win.HGDIOBJ(pen))
 
 	// Sol Üst'ten Sağ Alt'a
-	win.MoveToEx(hdc, centerX-size, centerY-size, nil)
-	win.LineTo(hdc, centerX-gap, centerY-gap)
-	win.MoveToEx(hdc, centerX+gap, centerY+gap, nil)
-	win.LineTo(hdc, centerX+size, centerY+size)
+	win.MoveToEx(hdc, int(centerX-size), int(centerY-size), nil)
+	win.LineTo(hdc, int32(centerX-gap), int32(centerY-gap))
+	win.MoveToEx(hdc, int(centerX+gap), int(centerY+gap), nil)
+	win.LineTo(hdc, int32(centerX+size), int32(centerY+size))
 
 	// Sağ Üst'ten Sol Alt'a
-	win.MoveToEx(hdc, centerX+size, centerY-size, nil)
-	win.LineTo(hdc, centerX+gap, centerY-gap)
-	win.MoveToEx(hdc, centerX-gap, centerY+gap, nil)
-	win.LineTo(hdc, centerX-size, centerY+size)
+	win.MoveToEx(hdc, int(centerX+size), int(centerY-size), nil)
+	win.LineTo(hdc, int32(centerX+gap), int32(centerY-gap))
+	win.MoveToEx(hdc, int(centerX-gap), int(centerY+gap), nil)
+	win.LineTo(hdc, int32(centerX-size), int32(centerY+size))
 }
 
 func createDynamicHealthPen(hp int32) uintptr {
