@@ -49,6 +49,7 @@ type Rectangle struct {
 
 type Entity struct {
 	Health   int32
+	Armor    int32 // YENİ: Zırh verisi
 	Team     int32
 	Name     string
 	Position Vector2
@@ -72,6 +73,7 @@ type Offset struct {
 	M_boneArray            uintptr `json:"m_boneArray"`
 	M_nodeToWorld          uintptr `json:"m_nodeToWorld"`
 	M_sSanitizedPlayerName uintptr `json:"m_sSanitizedPlayerName"`
+	M_ArmorValue           uintptr `json:"m_ArmorValue"` // YENİ: Zırh offseti
 }
 
 var (
@@ -98,6 +100,7 @@ var (
 	boxRendering        bool    = true
 	nameRendering       bool    = true
 	healthBarRendering  bool    = true
+	armorBarRendering   bool    = true // YENİ: Zırh barı aç-kapa bayrağı
 	healthTextRendering bool    = true
 	distanceRendering   bool    = true
 	frameDelay          uint32  = 15
@@ -110,9 +113,8 @@ const asciiArt = `
 /  \ /  \  |    __)_ \_____  \  /   |   \   |    __)_  \   Y   / |   |
 /    Y    \ |        \/        \/    |    \  |        \  \     /  |   |
 \____|__  /_______  /_______  /\____|__  /_______  /   \___/   |___|
-        \/        \/        \/         \/        \/                 `
+        \/        \/        \/         \/        \/                  `
 
-// Kalemler, Fırçalar ve Renk Seçimi (Global Scope)
 var (
 	bgBrush            uintptr
 	redPen             uintptr
@@ -123,6 +125,7 @@ var (
 	greenBonePen       uintptr
 	redBonePen         uintptr
 	outlinePen         uintptr
+	armorPen           uintptr // YENİ: Zırh çizim kalemi
 	skeletonColor      uintptr
 	skeletonColorIndex int
 )
@@ -132,7 +135,6 @@ func init() {
 	rand.Seed(time.Now().UnixNano())
 }
 
-// HSV renk uzayından RGB renk uzayına dönüştürme fonksiyonu
 func hsvToRGB(h, s, v float64) (byte, byte, byte) {
 	c := v * s
 	x := c * (1 - math.Abs(math.Mod(h/60.0, 2)-1))
@@ -231,6 +233,7 @@ func getEntitiesInfo(procHandle windows.Handle, clientDll uintptr, screenWidth u
 		entityBoneArray        uintptr
 		entityTeam             int32
 		entityHealth           int32
+		entityArmor            int32 // YENİ
 		entityLifeState        int32
 		entityName             string
 		sanitizedNameStr       string
@@ -360,6 +363,12 @@ func getEntitiesInfo(procHandle windows.Handle, clientDll uintptr, screenWidth u
 			continue
 		}
 
+		// YENİ: Zırh değerini okuma
+		err = read(procHandle, entityPawn+offsets.M_ArmorValue, &entityArmor)
+		if err != nil {
+			entityArmor = 0
+		}
+
 		err = read(procHandle, entityController+offsets.M_sSanitizedPlayerName, &entityNameAddress)
 		if err != nil {
 			return entities
@@ -427,6 +436,7 @@ func getEntitiesInfo(procHandle windows.Handle, clientDll uintptr, screenWidth u
 		boxHeight := screenPosFeetY - screenPosBoxTop
 
 		tempEntity.Health = entityHealth
+		tempEntity.Armor = entityArmor // YENİ
 		tempEntity.Team = entityTeam
 		tempEntity.Name = sanitizedNameStr
 		tempEntity.Distance = entityOrigin.Dist(localPlayerSceneOrigin) / 39.3700787
@@ -479,7 +489,8 @@ func createDynamicHealthPen(hp int32) uintptr {
 	return pen
 }
 
-func renderEntityInfo(hdc win.HDC, tPen uintptr, gPen uintptr, oPen uintptr, hPen uintptr, rect Rectangle, hp int32, name string, headPos Vector3, distance float32) {
+// YENİ: aPen ve armor parametreleri eklendi
+func renderEntityInfo(hdc win.HDC, tPen uintptr, gPen uintptr, oPen uintptr, hPen uintptr, aPen uintptr, rect Rectangle, hp int32, armor int32, name string, headPos Vector3, distance float32) {
 	if boxRendering {
 		win.SelectObject(hdc, win.HGDIOBJ(tPen))
 		win.MoveToEx(hdc, int(rect.Left), int(rect.Top), nil)
@@ -526,6 +537,24 @@ func renderEntityInfo(hdc win.HDC, tPen uintptr, gPen uintptr, oPen uintptr, hPe
 		win.LineTo(hdc, int32(rect.Left)-3, int32(rect.Bottom)+1)
 		win.LineTo(hdc, int32(rect.Left)-3, int32(rect.Top)-1)
 		win.LineTo(hdc, int32(rect.Left)-5, int32(rect.Top)-1)
+	}
+
+	// YENİ: Zırh Barı Çizimi (Kutunun sağ tarafına çizilir)
+	if armorBarRendering && armor > 0 {
+		if armor > 100 {
+			armor = 100
+		}
+		
+		win.SelectObject(hdc, win.HGDIOBJ(aPen))
+		win.MoveToEx(hdc, int(rect.Right)+4, int(rect.Bottom)+1-int(float64(int(rect.Bottom)+1-int(rect.Top))*float64(armor)/100.0), nil)
+		win.LineTo(hdc, int32(rect.Right)+4, int32(rect.Bottom)+1)
+
+		win.SelectObject(hdc, win.HGDIOBJ(oPen))
+		win.MoveToEx(hdc, int(rect.Right)+3, int(rect.Top)-1, nil)
+		win.LineTo(hdc, int32(rect.Right)+3, int32(rect.Bottom)+1)
+		win.LineTo(hdc, int32(rect.Right)+5, int32(rect.Bottom)+1)
+		win.LineTo(hdc, int32(rect.Right)+5, int32(rect.Top)-1)
+		win.LineTo(hdc, int32(rect.Right)+3, int32(rect.Top)-1)
 	}
 
 	if healthTextRendering {
@@ -646,14 +675,13 @@ func printStatus(label string, status bool) {
 }
 
 func renderUI() {
-	fmt.Print("\033[H") // Ekranı silmeden imleci sol üste taşır (Titremesiz yenileme)
+	fmt.Print("\033[H")
 
 	lines := strings.Split(asciiArt, "\n")
 	for i, line := range lines {
 		if line == "" {
 			continue
 		}
-		// Her satıra dalgalı renk tonu ataması
 		lineHue := math.Mod(currentHue+float64(i*25), 360)
 		r, g, b := hsvToRGB(lineHue, 1.0, 1.0)
 		fmt.Printf("\x1b[38;2;%d;%d;%dm%s\x1b[0m\n", r, g, b, line)
@@ -661,7 +689,7 @@ func renderUI() {
 
 	fmt.Println(chalk.Yellow.Color("        by associan - v1.8.2\n"))
 	fmt.Println(chalk.Cyan.Color("=========================================="))
-	fmt.Println(chalk.White.Color("         KISAYOL TUŞLARI (HOTKEYS)"))
+	fmt.Println(chalk.White.Color("          KISAYOL TUŞLARI (HOTKEYS)"))
 	fmt.Println(chalk.Cyan.Color("=========================================="))
 
 	printStatus("[F1] Box ESP", boxRendering)
@@ -671,6 +699,7 @@ func renderUI() {
 	printStatus("[F5] Health Bar", healthBarRendering)
 	printStatus("[F6] Player Name", nameRendering)
 	printStatus("[F7] Distance Display", distanceRendering)
+	printStatus("[F9] Armor Bar", armorBarRendering) // YENİ
 
 	colorNames := []string{"MAVİ", "YEŞİL", "KIRMIZI"}
 	currentColor := colorNames[skeletonColorIndex]
@@ -685,7 +714,7 @@ func startRGBUI() {
 	for {
 		currentHue = math.Mod(currentHue+3.0, 360)
 		renderUI()
-		time.Sleep(40 * time.Millisecond) // ~25 FPS konsol RGB döngüsü
+		time.Sleep(40 * time.Millisecond)
 	}
 }
 
@@ -696,8 +725,7 @@ func isKeyPressed(vKey int) bool {
 
 func listenHotkeys() {
 	for {
-		// VK_F8 = 0x77
-		if isKeyPressed(0x77) {
+		if isKeyPressed(0x77) { // F8
 			skeletonColorIndex = (skeletonColorIndex + 1) % 3
 			if skeletonColorIndex == 0 {
 				skeletonColor = blueBonePen
@@ -708,43 +736,39 @@ func listenHotkeys() {
 			}
 			playBeep(true)
 		}
-		// VK_F1 = 0x70
-		if isKeyPressed(0x70) {
+		if isKeyPressed(0x70) { // F1
 			boxRendering = !boxRendering
 			playBeep(boxRendering)
 		}
-		// VK_F2 = 0x71
-		if isKeyPressed(0x71) {
+		if isKeyPressed(0x71) { // F2
 			skeletonRendering = !skeletonRendering
 			playBeep(skeletonRendering)
 		}
-		// VK_F3 = 0x72
-		if isKeyPressed(0x72) {
+		if isKeyPressed(0x72) { // F3
 			headCircle = !headCircle
 			playBeep(headCircle)
 		}
-		// VK_F4 = 0x73
-		if isKeyPressed(0x73) {
+		if isKeyPressed(0x73) { // F4
 			teamCheck = !teamCheck
 			playBeep(teamCheck)
 		}
-		// VK_F5 = 0x74
-		if isKeyPressed(0x74) {
+		if isKeyPressed(0x74) { // F5
 			healthBarRendering = !healthBarRendering
 			playBeep(healthBarRendering)
 		}
-		// VK_F6 = 0x75
-		if isKeyPressed(0x75) {
+		if isKeyPressed(0x75) { // F6
 			nameRendering = !nameRendering
 			playBeep(nameRendering)
 		}
-		// VK_F7 = 0x76
-		if isKeyPressed(0x76) {
+		if isKeyPressed(0x76) { // F7
 			distanceRendering = !distanceRendering
 			playBeep(distanceRendering)
 		}
-		// VK_END = 0x23
-		if isKeyPressed(0x23) {
+		if isKeyPressed(0x78) { // YENİ: F9 tuşu Zırh Barı için
+			armorBarRendering = !armorBarRendering
+			playBeep(armorBarRendering)
+		}
+		if isKeyPressed(0x23) { // END
 			playBeep(false)
 			os.Exit(0)
 		}
@@ -754,7 +778,7 @@ func listenHotkeys() {
 }
 
 func main() {
-	fmt.Print("\033[H\033[2J") // Konsolu bir kez temizle
+	fmt.Print("\033[H\033[2J") 
 	go startRGBUI()
 	go listenHotkeys()
 
@@ -801,60 +825,41 @@ func main() {
 	defer win.DeleteObject(win.HGDIOBJ(bgBrush))
 
 	redPen, _, _ = createPen.Call(win.PS_SOLID, 1, 0x7a78ff)
-	if redPen == 0 {
-		logAndSleep("Error creating pen", fmt.Errorf("%v", win.GetLastError()))
-		return
-	}
+	if redPen == 0 { return }
 	defer win.DeleteObject(win.HGDIOBJ(redPen))
 
 	greenPen, _, _ = createPen.Call(win.PS_SOLID, 1, 0x7dff78)
-	if greenPen == 0 {
-		logAndSleep("Error creating pen", fmt.Errorf("%v", win.GetLastError()))
-		return
-	}
+	if greenPen == 0 { return }
 	defer win.DeleteObject(win.HGDIOBJ(greenPen))
 
 	bluePen, _, _ = createPen.Call(win.PS_SOLID, 1, 0xff8e78)
-	if bluePen == 0 {
-		logAndSleep("Error creating pen", fmt.Errorf("%v", win.GetLastError()))
-		return
-	}
+	if bluePen == 0 { return }
 	defer win.DeleteObject(win.HGDIOBJ(bluePen))
 
 	bonePen, _, _ = createPen.Call(win.PS_SOLID, 1, 0xffffff)
-	if bonePen == 0 {
-		logAndSleep("Error creating pen", fmt.Errorf("%v", win.GetLastError()))
-		return
-	}
+	if bonePen == 0 { return }
 	defer win.DeleteObject(win.HGDIOBJ(bonePen))
 
 	blueBonePen, _, _ = createPen.Call(win.PS_SOLID, 1, 0xff8e78)
-	if blueBonePen == 0 {
-		logAndSleep("Error creating pen", fmt.Errorf("%v", win.GetLastError()))
-		return
-	}
+	if blueBonePen == 0 { return }
 	defer win.DeleteObject(win.HGDIOBJ(blueBonePen))
 
 	greenBonePen, _, _ = createPen.Call(win.PS_SOLID, 1, 0x7dff78)
-	if greenBonePen == 0 {
-		logAndSleep("Error creating pen", fmt.Errorf("%v", win.GetLastError()))
-		return
-	}
+	if greenBonePen == 0 { return }
 	defer win.DeleteObject(win.HGDIOBJ(greenBonePen))
 
 	redBonePen, _, _ = createPen.Call(win.PS_SOLID, 1, 0x7a78ff)
-	if redBonePen == 0 {
-		logAndSleep("Error creating pen", fmt.Errorf("%v", win.GetLastError()))
-		return
-	}
+	if redBonePen == 0 { return }
 	defer win.DeleteObject(win.HGDIOBJ(redBonePen))
 
 	outlinePen, _, _ = createPen.Call(win.PS_SOLID, 1, 0x000000)
-	if outlinePen == 0 {
-		logAndSleep("Error creating pen", fmt.Errorf("%v", win.GetLastError()))
-		return
-	}
+	if outlinePen == 0 { return }
 	defer win.DeleteObject(win.HGDIOBJ(outlinePen))
+
+	// YENİ: Zırh kalemi oluşturuldu (Açık Mavi/Camgöbeği - GDI BGR formatında 0xffcc00)
+	armorPen, _, _ = createPen.Call(win.PS_SOLID, 2, 0xffcc00)
+	if armorPen == 0 { return }
+	defer win.DeleteObject(win.HGDIOBJ(armorPen))
 
 	skeletonColor = blueBonePen
 
@@ -885,10 +890,11 @@ func main() {
 			if skeletonRendering {
 				drawSkeleton(win.HDC(memhdc), skeletonColor, entity.Bones)
 			}
+			// YENİ: aPen ve entity.Armor renderEntityInfo fonksiyonuna iletildi
 			if entity.Team == 2 {
-				renderEntityInfo(win.HDC(memhdc), redPen, greenPen, outlinePen, bonePen, entity.Rect, entity.Health, entity.Name, entity.HeadPos, entity.Distance)
+				renderEntityInfo(win.HDC(memhdc), redPen, greenPen, outlinePen, bonePen, armorPen, entity.Rect, entity.Health, entity.Armor, entity.Name, entity.HeadPos, entity.Distance)
 			} else {
-				renderEntityInfo(win.HDC(memhdc), bluePen, greenPen, outlinePen, bonePen, entity.Rect, entity.Health, entity.Name, entity.HeadPos, entity.Distance)
+				renderEntityInfo(win.HDC(memhdc), bluePen, greenPen, outlinePen, bonePen, armorPen, entity.Rect, entity.Health, entity.Armor, entity.Name, entity.HeadPos, entity.Distance)
 			}
 		}
 		win.BitBlt(hdc, 0, 0, int32(screenWidth), int32(screenHeight), win.HDC(memhdc), 0, 0, win.SRCCOPY)
