@@ -49,7 +49,7 @@ type Rectangle struct {
 
 type Entity struct {
 	Health   int32
-	Armor    int32 // YENİ: Zırh verisi
+	Armor    int32
 	Team     int32
 	Name     string
 	Position Vector2
@@ -73,7 +73,7 @@ type Offset struct {
 	M_boneArray            uintptr `json:"m_boneArray"`
 	M_nodeToWorld          uintptr `json:"m_nodeToWorld"`
 	M_sSanitizedPlayerName uintptr `json:"m_sSanitizedPlayerName"`
-	M_ArmorValue           uintptr `json:"m_ArmorValue"` // YENİ: Zırh offseti
+	M_ArmorValue           uintptr `json:"m_ArmorValue"`
 }
 
 var (
@@ -94,17 +94,18 @@ var (
 )
 
 var (
-	teamCheck           bool    = true
-	headCircle          bool    = true
-	skeletonRendering   bool    = true
-	boxRendering        bool    = true
-	nameRendering       bool    = true
-	healthBarRendering  bool    = true
-	armorBarRendering   bool    = true // YENİ: Zırh barı aç-kapa bayrağı
-	healthTextRendering bool    = true
-	distanceRendering   bool    = true
-	frameDelay          uint32  = 15
-	currentHue          float64 = 0
+	teamCheck          bool    = true
+	headCircle         bool    = true
+	skeletonRendering  bool    = true
+	boxRendering       bool    = true
+	nameRendering      bool    = true
+	healthBarRendering bool    = true
+	armorBarRendering  bool    = true
+	healthTextRendering bool   = true
+	distanceRendering  bool    = true
+	hitmarkerRendering bool    = true // YENİ: Hitmarker açık/kapalı
+	frameDelay         uint32  = 15
+	currentHue         float64 = 0
 )
 
 const asciiArt = `
@@ -125,9 +126,13 @@ var (
 	greenBonePen       uintptr
 	redBonePen         uintptr
 	outlinePen         uintptr
-	armorPen           uintptr // YENİ: Zırh çizim kalemi
+	armorPen           uintptr
 	skeletonColor      uintptr
 	skeletonColorIndex int
+
+	// YENİ: Hitmarker için global değişkenler
+	lastHealthMap = make(map[uintptr]int32)
+	hitTime       time.Time
 )
 
 func init() {
@@ -174,6 +179,11 @@ func playBeep(enabled bool) {
 	}
 }
 
+func playHitSound() {
+	// YENİ: Vuruş yapıldığında oyunu dondurmamak için Goroutine içinde çağırılır
+	beepProc.Call(2000, 50) 
+}
+
 func logAndSleep(message string, err error) {
 	log.Printf("%s: %v\n", message, err)
 	time.Sleep(5 * time.Second)
@@ -215,6 +225,11 @@ func getOffsets() Offset {
 func getEntitiesInfo(procHandle windows.Handle, clientDll uintptr, screenWidth uintptr, screenHeight uintptr, offsets Offset) []Entity {
 	var entityList uintptr
 	var entities []Entity
+	
+	// YENİ: Anlık can durumunu tutmak için
+	currentHealthMap := make(map[uintptr]int32)
+	hitDetected := false
+
 	err := read(procHandle, clientDll+offsets.DwEntityList, &entityList)
 	if err != nil {
 		return entities
@@ -233,7 +248,7 @@ func getEntitiesInfo(procHandle windows.Handle, clientDll uintptr, screenWidth u
 		entityBoneArray        uintptr
 		entityTeam             int32
 		entityHealth           int32
-		entityArmor            int32 // YENİ
+		entityArmor            int32
 		entityLifeState        int32
 		entityName             string
 		sanitizedNameStr       string
@@ -282,105 +297,59 @@ func getEntitiesInfo(procHandle windows.Handle, clientDll uintptr, screenWidth u
 	if err != nil {
 		return entities
 	}
+	
 	for i := 0; i < 64; i++ {
 		var tempEntity Entity
 		var entityBones map[string]Vector2 = make(map[string]Vector2)
 		var sanitizedName strings.Builder
 
 		err = read(procHandle, entityList+uintptr((8*(i&0x7FFF)>>9)+16), &listEntry)
-		if err != nil {
-			return entities
-		}
-		if listEntry == 0 {
-			continue
-		}
+		if err != nil || listEntry == 0 { continue }
 
 		err = read(procHandle, listEntry+uintptr(112)*uintptr(i&0x1FF), &entityController)
-		if err != nil {
-			return entities
-		}
-		if entityController == 0 {
-			continue
-		}
+		if err != nil || entityController == 0 { continue }
 
 		err = read(procHandle, entityController+offsets.M_hPlayerPawn, &entityControllerPawn)
-		if err != nil {
-			return entities
-		}
-		if entityControllerPawn == 0 {
-			continue
-		}
+		if err != nil || entityControllerPawn == 0 { continue }
 
 		err = read(procHandle, entityList+uintptr(0x8*((entityControllerPawn&0x7FFF)>>9)+16), &listEntry)
-		if err != nil {
-			return entities
-		}
-		if listEntry == 0 {
-			continue
-		}
+		if err != nil || listEntry == 0 { continue }
 
 		err = read(procHandle, listEntry+uintptr(112)*uintptr(entityControllerPawn&0x1FF), &entityPawn)
-		if err != nil {
-			return entities
-		}
-		if entityPawn == 0 {
-			continue
-		}
-		if entityPawn == localPlayerP {
-			continue
-		}
+		if err != nil || entityPawn == 0 || entityPawn == localPlayerP { continue }
 
 		err = read(procHandle, entityPawn+offsets.M_lifeState, &entityLifeState)
-		if err != nil {
-			return entities
-		}
-		if entityLifeState != 256 {
-			continue
-		}
+		if err != nil || entityLifeState != 256 { continue }
 
 		err = read(procHandle, entityPawn+offsets.M_iTeamNum, &entityTeam)
-		if err != nil {
-			return entities
-		}
-		if entityTeam == 0 {
-			continue
-		}
+		if err != nil || entityTeam == 0 { continue }
+		
 		if teamCheck {
 			err = read(procHandle, localPlayerP+offsets.M_iTeamNum, &localTeam)
-			if err != nil {
-				return entities
-			}
-			if localTeam == entityTeam {
-				continue
-			}
+			if err != nil || localTeam == entityTeam { continue }
 		}
 
 		err = read(procHandle, entityPawn+offsets.M_iHealth, &entityHealth)
-		if err != nil {
-			return entities
-		}
-		if entityHealth < 1 || entityHealth > 100 {
-			continue
+		if err != nil || entityHealth < 1 || entityHealth > 100 { continue }
+
+		// YENİ: Hitmarker Algoritması
+		currentHealthMap[entityPawn] = entityHealth
+		if prevHP, exists := lastHealthMap[entityPawn]; exists {
+			// Eğer önceki kayıttaki can şu anki candan fazlaysa hasar almıştır
+			if entityHealth < prevHP {
+				hitDetected = true
+			}
 		}
 
-		// YENİ: Zırh değerini okuma
 		err = read(procHandle, entityPawn+offsets.M_ArmorValue, &entityArmor)
-		if err != nil {
-			entityArmor = 0
-		}
+		if err != nil { entityArmor = 0 }
 
 		err = read(procHandle, entityController+offsets.M_sSanitizedPlayerName, &entityNameAddress)
-		if err != nil {
-			return entities
-		}
+		if err != nil { return entities }
 
 		err = read(procHandle, entityNameAddress, &entityName)
-		if err != nil {
-			return entities
-		}
-		if entityName == "" {
-			continue
-		}
+		if err != nil || entityName == "" { continue }
+		
 		for _, c := range entityName {
 			if unicode.IsLetter(c) || unicode.IsDigit(c) || unicode.IsPunct(c) || unicode.IsSpace(c) {
 				sanitizedName.WriteRune(c)
@@ -389,36 +358,20 @@ func getEntitiesInfo(procHandle windows.Handle, clientDll uintptr, screenWidth u
 		sanitizedNameStr = sanitizedName.String()
 
 		err = read(procHandle, entityPawn+offsets.M_pGameSceneNode, &gameScene)
-		if err != nil {
-			return entities
-		}
-		if gameScene == 0 {
-			continue
-		}
+		if err != nil || gameScene == 0 { continue }
 
 		err = read(procHandle, gameScene+offsets.M_modelState+offsets.M_boneArray, &entityBoneArray)
-		if err != nil {
-			return entities
-		}
-		if entityBoneArray == 0 {
-			continue
-		}
+		if err != nil || entityBoneArray == 0 { continue }
 
 		err = read(procHandle, entityPawn+offsets.M_vOldOrigin, &entityOrigin)
-		if err != nil {
-			return entities
-		}
+		if err != nil { return entities }
 
 		for boneName, boneIndex := range bones {
 			err = read(procHandle, entityBoneArray+uintptr(boneIndex)*32, &currentBone)
-			if err != nil {
-				return entities
-			}
+			if err != nil { return entities }
 			if boneName == "head" {
 				entityHead = currentBone
-				if !skeletonRendering {
-					break
-				}
+				if !skeletonRendering { break }
 			}
 			boneX, boneY := worldToScreen(viewMatrix, currentBone)
 			entityBones[boneName] = Vector2{boneX, boneY}
@@ -436,7 +389,7 @@ func getEntitiesInfo(procHandle windows.Handle, clientDll uintptr, screenWidth u
 		boxHeight := screenPosFeetY - screenPosBoxTop
 
 		tempEntity.Health = entityHealth
-		tempEntity.Armor = entityArmor // YENİ
+		tempEntity.Armor = entityArmor
 		tempEntity.Team = entityTeam
 		tempEntity.Name = sanitizedNameStr
 		tempEntity.Distance = entityOrigin.Dist(localPlayerSceneOrigin) / 39.3700787
@@ -447,6 +400,14 @@ func getEntitiesInfo(procHandle windows.Handle, clientDll uintptr, screenWidth u
 
 		entities = append(entities, tempEntity)
 	}
+
+	// YENİ: Can haritasını güncelle ve hitmarker tetikle
+	lastHealthMap = currentHealthMap
+	if hitDetected && hitmarkerRendering {
+		hitTime = time.Now()
+		go playHitSound()
+	}
+
 	return entities
 }
 
@@ -475,15 +436,9 @@ func drawSkeleton(hdc win.HDC, pen uintptr, bones map[string]Vector2) {
 }
 
 func createDynamicHealthPen(hp int32) uintptr {
-	if hp < 0 {
-		hp = 0
-	} else if hp > 100 {
-		hp = 100
-	}
-
+	if hp < 0 { hp = 0 } else if hp > 100 { hp = 100 }
 	r := byte((100 - hp) * 255 / 100)
 	g := byte(hp * 255 / 100)
-
 	color := uintptr(r) | (uintptr(g) << 8)
 	pen, _, _ := createPen.Call(win.PS_SOLID, 2, color)
 	return pen
@@ -523,11 +478,9 @@ func renderEntityInfo(hdc win.HDC, tPen uintptr, gPen uintptr, oPen uintptr, hPe
 
 	if healthBarRendering {
 		dynamicHpPen := createDynamicHealthPen(hp)
-
 		win.SelectObject(hdc, win.HGDIOBJ(dynamicHpPen))
 		win.MoveToEx(hdc, int(rect.Left)-4, int(rect.Bottom)+1-int(float64(int(rect.Bottom)+1-int(rect.Top))*float64(hp)/100.0), nil)
 		win.LineTo(hdc, int32(rect.Left)-4, int32(rect.Bottom)+1)
-
 		win.DeleteObject(win.HGDIOBJ(dynamicHpPen))
 
 		win.SelectObject(hdc, win.HGDIOBJ(oPen))
@@ -538,20 +491,14 @@ func renderEntityInfo(hdc win.HDC, tPen uintptr, gPen uintptr, oPen uintptr, hPe
 		win.LineTo(hdc, int32(rect.Left)-5, int32(rect.Top)-1)
 	}
 
-	// Zırh Barı ve Yüzdesi Çizimi
 	if armorBarRendering && armor > 0 {
-		if armor > 100 {
-			armor = 100
-		}
-		
+		if armor > 100 { armor = 100 }
 		yPos := int(rect.Bottom) + 1 - int(float64(int(rect.Bottom)+1-int(rect.Top))*float64(armor)/100.0)
 
-		// Barı çiz
 		win.SelectObject(hdc, win.HGDIOBJ(aPen))
 		win.MoveToEx(hdc, int(rect.Right)+4, yPos, nil)
 		win.LineTo(hdc, int32(rect.Right)+4, int32(rect.Bottom)+1)
 
-		// Barın dış çerçevesini çiz
 		win.SelectObject(hdc, win.HGDIOBJ(oPen))
 		win.MoveToEx(hdc, int(rect.Right)+3, int(rect.Top)-1, nil)
 		win.LineTo(hdc, int32(rect.Right)+3, int32(rect.Bottom)+1)
@@ -559,17 +506,16 @@ func renderEntityInfo(hdc win.HDC, tPen uintptr, gPen uintptr, oPen uintptr, hPe
 		win.LineTo(hdc, int32(rect.Right)+5, int32(rect.Top)-1)
 		win.LineTo(hdc, int32(rect.Right)+3, int32(rect.Top)-1)
 
-		// Zırh miktarını sayı (yüzde) olarak yazdır
 		armorText, _ := windows.UTF16PtrFromString(fmt.Sprintf("%d", armor))
-		win.SetTextColor(hdc, win.RGB(byte(0), byte(204), byte(255))) // Açık mavi (Camgöbeği)
-		setTextAlign.Call(uintptr(hdc), 0x00000000) // TA_LEFT (Sola dayalı, barın sağına yazması için)
+		win.SetTextColor(hdc, win.RGB(byte(0), byte(204), byte(255))) 
+		setTextAlign.Call(uintptr(hdc), 0x00000000) 
 		win.TextOut(hdc, int32(rect.Right)+8, int32(yPos)-4, armorText, int32(len(fmt.Sprintf("%d", armor))))
 	}
 
 	if healthTextRendering {
 		text, _ := windows.UTF16PtrFromString(fmt.Sprintf("%d", hp))
 		win.SetTextColor(hdc, win.RGB(byte(0), byte(255), byte(50)))
-		setTextAlign.Call(uintptr(hdc), 0x00000002) // TA_RIGHT
+		setTextAlign.Call(uintptr(hdc), 0x00000002)
 		if healthBarRendering {
 			win.TextOut(hdc, int32(rect.Left)-8, int32(int(rect.Bottom)+1-int(float64(int(rect.Bottom)+1-int(rect.Top))*float64(hp)/100.0)), text, int32(len(fmt.Sprintf("%d", hp))))
 		} else {
@@ -610,15 +556,9 @@ func initWindow(screenWidth uintptr, screenHeight uintptr) win.HWND {
 	randWindowTitle := generateRandomString(16)
 
 	className, err := windows.UTF16PtrFromString(randClassName)
-	if err != nil {
-		logAndSleep("Error creating window class name", err)
-		return 0
-	}
+	if err != nil { return 0 }
 	windowTitle, err := windows.UTF16PtrFromString(randWindowTitle)
-	if err != nil {
-		logAndSleep("Error creating window title", err)
-		return 0
-	}
+	if err != nil { return 0 }
 
 	wc := win.WNDCLASSEX{
 		CbSize:        uint32(unsafe.Sizeof(win.WNDCLASSEX{})),
@@ -634,42 +574,21 @@ func initWindow(screenWidth uintptr, screenHeight uintptr) win.HWND {
 		HIconSm:       win.LoadIcon(0, (*uint16)(unsafe.Pointer(uintptr(win.IDI_APPLICATION)))),
 	}
 
-	if atom := win.RegisterClassEx(&wc); atom == 0 {
-		logAndSleep("Error registering window class", fmt.Errorf("%v", win.GetLastError()))
-		return 0
-	}
+	if atom := win.RegisterClassEx(&wc); atom == 0 { return 0 }
 
 	hInstance := win.GetModuleHandle(nil)
 	hwnd := win.CreateWindowEx(
 		win.WS_EX_TOPMOST|win.WS_EX_NOACTIVATE|win.WS_EX_LAYERED,
-		className,
-		windowTitle,
-		win.WS_POPUP,
-		0,
-		0,
-		int32(screenWidth),
-		int32(screenHeight),
-		0,
-		0,
-		hInstance,
-		nil,
+		className, windowTitle, win.WS_POPUP, 0, 0, int32(screenWidth), int32(screenHeight),
+		0, 0, hInstance, nil,
 	)
-	if hwnd == 0 {
-		logAndSleep("Error creating window", fmt.Errorf("%v", win.GetLastError()))
-		return 0
-	}
+	if hwnd == 0 { return 0 }
 
-	result, _, _ := setLayeredWindowAttributes.Call(uintptr(hwnd), 0x000000, 0, 0x00000001)
-	if result == 0 {
-		logAndSleep("Error setting layered window attributes", fmt.Errorf("%v", win.GetLastError()))
-	}
+	setLayeredWindowAttributes.Call(uintptr(hwnd), 0x000000, 0, 0x00000001)
 	style := win.GetWindowLongPtr(hwnd, win.GWL_EXSTYLE)
 	style |= win.WS_EX_TRANSPARENT
 	win.SetWindowLongPtr(hwnd, win.GWL_EXSTYLE, style)
-
-	const WDA_EXCLUDEFROMCAPTURE = 0x00000011
-	setWindowDisplayAffinity.Call(uintptr(hwnd), uintptr(WDA_EXCLUDEFROMCAPTURE))
-
+	setWindowDisplayAffinity.Call(uintptr(hwnd), 0x00000011)
 	showCursor.Call(0)
 	win.ShowWindow(hwnd, win.SW_SHOWDEFAULT)
 	return hwnd
@@ -685,18 +604,15 @@ func printStatus(label string, status bool) {
 
 func renderUI() {
 	fmt.Print("\033[H")
-
 	lines := strings.Split(asciiArt, "\n")
 	for i, line := range lines {
-		if line == "" {
-			continue
-		}
+		if line == "" { continue }
 		lineHue := math.Mod(currentHue+float64(i*25), 360)
 		r, g, b := hsvToRGB(lineHue, 1.0, 1.0)
 		fmt.Printf("\x1b[38;2;%d;%d;%dm%s\x1b[0m\n", r, g, b, line)
 	}
 
-	fmt.Println(chalk.Yellow.Color("        by associan - v1.8.2\n"))
+	fmt.Println(chalk.Yellow.Color("        by associan - v1.9.0\n"))
 	fmt.Println(chalk.Cyan.Color("=========================================="))
 	fmt.Println(chalk.White.Color("          KISAYOL TUŞLARI (HOTKEYS)"))
 	fmt.Println(chalk.Cyan.Color("=========================================="))
@@ -708,7 +624,8 @@ func renderUI() {
 	printStatus("[F5] Health Bar", healthBarRendering)
 	printStatus("[F6] Player Name", nameRendering)
 	printStatus("[F7] Distance Display", distanceRendering)
-	printStatus("[F9] Armor Bar", armorBarRendering) // YENİ
+	printStatus("[F9] Armor Bar", armorBarRendering)
+	printStatus("[F10] Hitmarker & Sound", hitmarkerRendering) // YENİ
 
 	colorNames := []string{"MAVİ", "YEŞİL", "KIRMIZI"}
 	currentColor := colorNames[skeletonColorIndex]
@@ -736,51 +653,21 @@ func listenHotkeys() {
 	for {
 		if isKeyPressed(0x77) { // F8
 			skeletonColorIndex = (skeletonColorIndex + 1) % 3
-			if skeletonColorIndex == 0 {
-				skeletonColor = blueBonePen
-			} else if skeletonColorIndex == 1 {
-				skeletonColor = greenBonePen
-			} else if skeletonColorIndex == 2 {
-				skeletonColor = redBonePen
-			}
+			if skeletonColorIndex == 0 { skeletonColor = blueBonePen
+			} else if skeletonColorIndex == 1 { skeletonColor = greenBonePen
+			} else if skeletonColorIndex == 2 { skeletonColor = redBonePen }
 			playBeep(true)
 		}
-		if isKeyPressed(0x70) { // F1
-			boxRendering = !boxRendering
-			playBeep(boxRendering)
-		}
-		if isKeyPressed(0x71) { // F2
-			skeletonRendering = !skeletonRendering
-			playBeep(skeletonRendering)
-		}
-		if isKeyPressed(0x72) { // F3
-			headCircle = !headCircle
-			playBeep(headCircle)
-		}
-		if isKeyPressed(0x73) { // F4
-			teamCheck = !teamCheck
-			playBeep(teamCheck)
-		}
-		if isKeyPressed(0x74) { // F5
-			healthBarRendering = !healthBarRendering
-			playBeep(healthBarRendering)
-		}
-		if isKeyPressed(0x75) { // F6
-			nameRendering = !nameRendering
-			playBeep(nameRendering)
-		}
-		if isKeyPressed(0x76) { // F7
-			distanceRendering = !distanceRendering
-			playBeep(distanceRendering)
-		}
-		if isKeyPressed(0x78) { // YENİ: F9 tuşu Zırh Barı için
-			armorBarRendering = !armorBarRendering
-			playBeep(armorBarRendering)
-		}
-		if isKeyPressed(0x23) { // END
-			playBeep(false)
-			os.Exit(0)
-		}
+		if isKeyPressed(0x70) { boxRendering = !boxRendering; playBeep(boxRendering) }
+		if isKeyPressed(0x71) { skeletonRendering = !skeletonRendering; playBeep(skeletonRendering) }
+		if isKeyPressed(0x72) { headCircle = !headCircle; playBeep(headCircle) }
+		if isKeyPressed(0x73) { teamCheck = !teamCheck; playBeep(teamCheck) }
+		if isKeyPressed(0x74) { healthBarRendering = !healthBarRendering; playBeep(healthBarRendering) }
+		if isKeyPressed(0x75) { nameRendering = !nameRendering; playBeep(nameRendering) }
+		if isKeyPressed(0x76) { distanceRendering = !distanceRendering; playBeep(distanceRendering) }
+		if isKeyPressed(0x78) { armorBarRendering = !armorBarRendering; playBeep(armorBarRendering) } // F9
+		if isKeyPressed(0x79) { hitmarkerRendering = !hitmarkerRendering; playBeep(hitmarkerRendering) } // YENİ: F10
+		if isKeyPressed(0x23) { playBeep(false); os.Exit(0) } // END
 
 		time.Sleep(50 * time.Millisecond)
 	}
@@ -795,93 +682,51 @@ func main() {
 	screenHeight, _, _ := getSystemMetrics.Call(1)
 
 	hwnd := initWindow(screenWidth, screenHeight)
-	if hwnd == 0 {
-		logAndSleep("Error creating window", fmt.Errorf("%v", win.GetLastError()))
-		return
-	}
+	if hwnd == 0 { return }
 	defer win.DestroyWindow(hwnd)
 
 	pid, err := findProcessId("cs2.exe")
-	if err != nil {
-		logAndSleep("Error finding process ID", err)
-		return
-	}
+	if err != nil { logAndSleep("Error finding process ID", err); return }
 
 	clientDll, err := getModuleBaseAddress(pid, "client.dll")
-	if err != nil {
-		logAndSleep("Error getting client.dll base address", err)
-		return
-	}
+	if err != nil { logAndSleep("Error getting client.dll base address", err); return }
 
 	procHandle, err := getProcessHandle(pid)
-	if err != nil {
-		logAndSleep("Error getting process handle", err)
-		return
-	}
+	if err != nil { logAndSleep("Error getting process handle", err); return }
 
 	hdc := win.GetDC(hwnd)
-	if hdc == 0 {
-		logAndSleep("Error getting device context", fmt.Errorf("%v", win.GetLastError()))
-		return
-	}
+	if hdc == 0 { return }
 
-	var errCreate error
-	bgBrush, _, errCreate = createSolidBrush.Call(uintptr(0x000000))
-	if bgBrush == 0 {
-		logAndSleep("Error creating brush", errCreate)
-		return
-	}
+	bgBrush, _, _ = createSolidBrush.Call(uintptr(0x000000))
 	defer win.DeleteObject(win.HGDIOBJ(bgBrush))
 
 	redPen, _, _ = createPen.Call(win.PS_SOLID, 1, 0x7a78ff)
-	if redPen == 0 { return }
 	defer win.DeleteObject(win.HGDIOBJ(redPen))
-
 	greenPen, _, _ = createPen.Call(win.PS_SOLID, 1, 0x7dff78)
-	if greenPen == 0 { return }
 	defer win.DeleteObject(win.HGDIOBJ(greenPen))
-
 	bluePen, _, _ = createPen.Call(win.PS_SOLID, 1, 0xff8e78)
-	if bluePen == 0 { return }
 	defer win.DeleteObject(win.HGDIOBJ(bluePen))
-
-	bonePen, _, _ = createPen.Call(win.PS_SOLID, 1, 0xffffff)
-	if bonePen == 0 { return }
+	bonePen, _, _ = createPen.Call(win.PS_SOLID, 1, 0xffffff) // Hitmarker için de beyaz kalemi kullanacağız
 	defer win.DeleteObject(win.HGDIOBJ(bonePen))
-
 	blueBonePen, _, _ = createPen.Call(win.PS_SOLID, 1, 0xff8e78)
-	if blueBonePen == 0 { return }
 	defer win.DeleteObject(win.HGDIOBJ(blueBonePen))
-
 	greenBonePen, _, _ = createPen.Call(win.PS_SOLID, 1, 0x7dff78)
-	if greenBonePen == 0 { return }
 	defer win.DeleteObject(win.HGDIOBJ(greenBonePen))
-
 	redBonePen, _, _ = createPen.Call(win.PS_SOLID, 1, 0x7a78ff)
-	if redBonePen == 0 { return }
 	defer win.DeleteObject(win.HGDIOBJ(redBonePen))
-
 	outlinePen, _, _ = createPen.Call(win.PS_SOLID, 1, 0x000000)
-	if outlinePen == 0 { return }
 	defer win.DeleteObject(win.HGDIOBJ(outlinePen))
-
-	// YENİ: Zırh kalemi oluşturuldu (Açık Mavi/Camgöbeği - GDI BGR formatında 0xffcc00)
 	armorPen, _, _ = createPen.Call(win.PS_SOLID, 2, 0xffcc00)
-	if armorPen == 0 { return }
 	defer win.DeleteObject(win.HGDIOBJ(armorPen))
 
 	skeletonColor = blueBonePen
-
 	font, _, _ := createFont.Call(12, 0, 0, 0, win.FW_HEAVY, 0, 0, 0, win.DEFAULT_CHARSET, win.OUT_DEFAULT_PRECIS, win.CLIP_DEFAULT_PRECIS, win.DEFAULT_QUALITY, win.DEFAULT_PITCH|win.FF_DONTCARE, 0)
-
 	offsets := getOffsets()
-
 	var msg win.MSG
 
 	for win.GetMessage(&msg, 0, 0, 0) > 0 {
 		win.TranslateMessage(&msg)
 		win.DispatchMessage(&msg)
-
 		win.SetTimer(hwnd, 1, frameDelay, 0)
 
 		memhdc, _, _ := createCompatibleDC.Call(uintptr(hdc))
@@ -893,21 +738,33 @@ func main() {
 
 		entities := getEntitiesInfo(procHandle, clientDll, screenWidth, screenHeight, offsets)
 		for _, entity := range entities {
-			if entity.Distance < 0.8 {
-				continue
-			}
-			if skeletonRendering {
-				drawSkeleton(win.HDC(memhdc), skeletonColor, entity.Bones)
-			}
-			// YENİ: aPen ve entity.Armor renderEntityInfo fonksiyonuna iletildi
+			if entity.Distance < 0.8 { continue }
+			if skeletonRendering { drawSkeleton(win.HDC(memhdc), skeletonColor, entity.Bones) }
 			if entity.Team == 2 {
 				renderEntityInfo(win.HDC(memhdc), redPen, greenPen, outlinePen, bonePen, armorPen, entity.Rect, entity.Health, entity.Armor, entity.Name, entity.HeadPos, entity.Distance)
 			} else {
 				renderEntityInfo(win.HDC(memhdc), bluePen, greenPen, outlinePen, bonePen, armorPen, entity.Rect, entity.Health, entity.Armor, entity.Name, entity.HeadPos, entity.Distance)
 			}
 		}
-		win.BitBlt(hdc, 0, 0, int32(screenWidth), int32(screenHeight), win.HDC(memhdc), 0, 0, win.SRCCOPY)
 
+		// YENİ: Hitmarker Ekran Çizimi (Eğer vuruşun üzerinden 300ms'den az geçtiyse)
+		if hitmarkerRendering && time.Since(hitTime).Milliseconds() < 300 {
+			centerX := int(screenWidth / 2)
+			centerY := int(screenHeight / 2)
+			size := int32(8) // X işaretinin boyutu
+
+			win.SelectObject(win.HDC(memhdc), win.HGDIOBJ(bonePen)) // Beyaz çizgi
+			
+			// Sol üstten sağ alta çizgi
+			win.MoveToEx(win.HDC(memhdc), centerX-int(size), centerY-int(size), nil)
+			win.LineTo(win.HDC(memhdc), int32(centerX)+size, int32(centerY)+size)
+			
+			// Sol alttan sağ üste çizgi
+			win.MoveToEx(win.HDC(memhdc), centerX-int(size), centerY+int(size), nil)
+			win.LineTo(win.HDC(memhdc), int32(centerX)+size, int32(centerY)-size)
+		}
+
+		win.BitBlt(hdc, 0, 0, int32(screenWidth), int32(screenHeight), win.HDC(memhdc), 0, 0, win.SRCCOPY)
 		win.DeleteObject(win.HGDIOBJ(memBitmap))
 		win.DeleteDC(win.HDC(memhdc))
 	}
