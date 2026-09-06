@@ -12,5 +12,7 @@
     "m_boneArray": 128,
     "m_nodeToWorld": 16,
     "m_sSanitizedPlayerName": 2152,
-    "m_ArmorValue": 7332
+    "m_ArmorValue": 7332,
+    "m_pBulletServices": 5224,
+    "m_totalHitsOnServer": 64
 }
