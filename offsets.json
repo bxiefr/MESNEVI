@@ -1,7 +1,7 @@
 {
-    "dwViewMatrix": 39223200,
-    "dwLocalPlayerPawn": 39200776,
-    "dwEntityList": 40990760,
+    "dwViewMatrix": 39235616,
+    "dwLocalPlayerPawn": 39212824,
+    "dwEntityList": 41003272,
     "m_hPlayerPawn": 2348,
     "m_iHealth": 844,
     "m_lifeState": 852,
@@ -12,5 +12,5 @@
     "m_boneArray": 128,
     "m_nodeToWorld": 16,
     "m_sSanitizedPlayerName": 2168,
-    "m_ArmorValue": 7884
+    "m_ArmorValue": 7880
 }
